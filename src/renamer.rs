@@ -2,6 +2,7 @@ use chrono::{DateTime, Local};
 use glob::Pattern;
 use std::fs;
 use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 use crate::config::Config;
 
@@ -17,20 +18,29 @@ pub fn plan_renames(config: &Config) -> Vec<RenameOp> {
         return vec![];
     }
 
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("error: cannot read '{}': {e}", dir.display());
-            return vec![];
-        }
-    };
-
+    let max_depth = config.depth + 1;
     let mut ops = Vec::new();
 
-    for entry in entries.flatten() {
-        let path = entry.path();
+    for entry in WalkDir::new(dir).max_depth(max_depth).into_iter().flatten() {
+        let path = entry.path().to_path_buf();
         if !path.is_file() {
             continue;
+        }
+
+        let parent = match path.parent() {
+            Some(p) => p,
+            None => continue,
+        };
+
+        let is_root = parent == dir;
+        if !is_root {
+            let rel = match parent.strip_prefix(dir) {
+                Ok(r) => r.to_string_lossy().to_string(),
+                Err(_) => continue,
+            };
+            if !is_subfolder_allowed(&rel, config) {
+                continue;
+            }
         }
 
         let ext = match path.extension().and_then(|e| e.to_str()) {
@@ -52,17 +62,14 @@ pub fn plan_renames(config: &Config) -> Vec<RenameOp> {
         let stripped = strip_date_prefix(stem);
         let title = slugify(stripped);
         let new_name = format!("{date_str}-{title}.{ext}");
-        let new_path = dir.join(&new_name);
+        let new_path = parent.join(&new_name);
 
         if new_path.exists() {
             eprintln!("warning: '{}' already exists, skipping '{}'", new_name, path.display());
             continue;
         }
 
-        ops.push(RenameOp {
-            from: path,
-            to: new_path,
-        });
+        ops.push(RenameOp { from: path, to: new_path });
     }
 
     ops
@@ -218,5 +225,66 @@ mod tests {
         let cfg = make_config(vec!["*"], vec!["archive"], 1);
         assert!(is_subfolder_allowed("notes", &cfg));
         assert!(!is_subfolder_allowed("archive", &cfg));
+    }
+
+    #[test]
+    fn test_plan_renames_skips_subfolder_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("notes");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(dir.path().join("root-file.md"), "root").unwrap();
+        std::fs::write(sub.join("nested-file.md"), "nested").unwrap();
+
+        let cfg = Config {
+            docs_dir: dir.path().to_path_buf(),
+            format: "%Y-%m-%d-%H-%M-%S".to_string(),
+            extensions: vec!["md".to_string()],
+            allow_dirs: vec![],
+            deny_dirs: vec![],
+            depth: 1,
+        };
+        let ops = plan_renames(&cfg);
+        assert_eq!(ops.len(), 1);
+        assert!(ops[0].from.file_name().unwrap().to_str().unwrap().contains("root-file"));
+    }
+
+    #[test]
+    fn test_plan_renames_includes_allowed_subfolder() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("notes");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(dir.path().join("root-file.md"), "root").unwrap();
+        std::fs::write(sub.join("nested-file.md"), "nested").unwrap();
+
+        let cfg = Config {
+            docs_dir: dir.path().to_path_buf(),
+            format: "%Y-%m-%d-%H-%M-%S".to_string(),
+            extensions: vec!["md".to_string()],
+            allow_dirs: vec!["notes".to_string()],
+            deny_dirs: vec![],
+            depth: 1,
+        };
+        let ops = plan_renames(&cfg);
+        assert_eq!(ops.len(), 2);
+    }
+
+    #[test]
+    fn test_plan_renames_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("notes");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("my-doc.md"), "content").unwrap();
+
+        let cfg = Config {
+            docs_dir: dir.path().to_path_buf(),
+            format: "%Y-%m-%d-%H-%M-%S".to_string(),
+            extensions: vec!["md".to_string()],
+            allow_dirs: vec!["notes".to_string()],
+            deny_dirs: vec![],
+            depth: 1,
+        };
+        let ops = plan_renames(&cfg);
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].to.parent().unwrap(), sub.as_path());
     }
 }
