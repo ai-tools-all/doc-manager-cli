@@ -18,6 +18,19 @@ pub fn plan_renames(config: &Config) -> Vec<RenameOp> {
         return vec![];
     }
 
+    let allow_pats: Vec<Pattern> = config.allow_dirs.iter()
+        .filter_map(|p| match Pattern::new(p) {
+            Ok(pat) => Some(pat),
+            Err(e) => { eprintln!("warning: invalid allow pattern '{}': {e}", p); None }
+        })
+        .collect();
+    let deny_pats: Vec<Pattern> = config.deny_dirs.iter()
+        .filter_map(|p| match Pattern::new(p) {
+            Ok(pat) => Some(pat),
+            Err(e) => { eprintln!("warning: invalid deny pattern '{}': {e}", p); None }
+        })
+        .collect();
+
     let max_depth = config.depth + 1;
     let mut ops = Vec::new();
 
@@ -38,7 +51,7 @@ pub fn plan_renames(config: &Config) -> Vec<RenameOp> {
                 Ok(r) => r.to_string_lossy().to_string(),
                 Err(_) => continue,
             };
-            if !is_subfolder_allowed(&rel, config) {
+            if !is_subfolder_allowed(&rel, &allow_pats, &deny_pats) {
                 continue;
             }
         }
@@ -160,17 +173,18 @@ fn slugify(name: &str) -> String {
         .to_string()
 }
 
-fn is_subfolder_allowed(subfolder: &str, config: &Config) -> bool {
-    if config.allow_dirs.is_empty() {
+fn is_subfolder_allowed(subfolder: &str, allow: &[Pattern], deny: &[Pattern]) -> bool {
+    if allow.is_empty() {
         return false;
     }
-    for pat in &config.deny_dirs {
-        if Pattern::new(pat).map_or(false, |p| p.matches(subfolder)) {
+    let top_level = subfolder.split('/').next().unwrap_or(subfolder);
+    for pat in deny {
+        if pat.matches(top_level) {
             return false;
         }
     }
-    for pat in &config.allow_dirs {
-        if Pattern::new(pat).map_or(false, |p| p.matches(subfolder)) {
+    for pat in allow {
+        if pat.matches(top_level) {
             return true;
         }
     }
@@ -193,38 +207,61 @@ mod tests {
         }
     }
 
+    fn compile_patterns(pats: &[String]) -> Vec<Pattern> {
+        pats.iter().filter_map(|p| Pattern::new(p).ok()).collect()
+    }
+
     #[test]
     fn test_is_subfolder_allowed_empty_allow() {
         let cfg = make_config(vec![], vec![], 1);
-        assert!(!is_subfolder_allowed("notes", &cfg));
+        let allow = compile_patterns(&cfg.allow_dirs);
+        let deny = compile_patterns(&cfg.deny_dirs);
+        assert!(!is_subfolder_allowed("notes", &allow, &deny));
     }
 
     #[test]
     fn test_is_subfolder_allowed_wildcard() {
         let cfg = make_config(vec!["*"], vec![], 1);
-        assert!(is_subfolder_allowed("anything", &cfg));
+        let allow = compile_patterns(&cfg.allow_dirs);
+        let deny = compile_patterns(&cfg.deny_dirs);
+        assert!(is_subfolder_allowed("anything", &allow, &deny));
     }
 
     #[test]
     fn test_is_subfolder_allowed_specific() {
         let cfg = make_config(vec!["running-knowledge"], vec![], 1);
-        assert!(is_subfolder_allowed("running-knowledge", &cfg));
-        assert!(!is_subfolder_allowed("other", &cfg));
+        let allow = compile_patterns(&cfg.allow_dirs);
+        let deny = compile_patterns(&cfg.deny_dirs);
+        assert!(is_subfolder_allowed("running-knowledge", &allow, &deny));
+        assert!(!is_subfolder_allowed("other", &allow, &deny));
     }
 
     #[test]
     fn test_is_subfolder_allowed_glob() {
         let cfg = make_config(vec!["running-*"], vec![], 1);
-        assert!(is_subfolder_allowed("running-knowledge", &cfg));
-        assert!(is_subfolder_allowed("running-notes", &cfg));
-        assert!(!is_subfolder_allowed("archive", &cfg));
+        let allow = compile_patterns(&cfg.allow_dirs);
+        let deny = compile_patterns(&cfg.deny_dirs);
+        assert!(is_subfolder_allowed("running-knowledge", &allow, &deny));
+        assert!(is_subfolder_allowed("running-notes", &allow, &deny));
+        assert!(!is_subfolder_allowed("archive", &allow, &deny));
     }
 
     #[test]
     fn test_deny_overrides_allow() {
         let cfg = make_config(vec!["*"], vec!["archive"], 1);
-        assert!(is_subfolder_allowed("notes", &cfg));
-        assert!(!is_subfolder_allowed("archive", &cfg));
+        let allow = compile_patterns(&cfg.allow_dirs);
+        let deny = compile_patterns(&cfg.deny_dirs);
+        assert!(is_subfolder_allowed("notes", &allow, &deny));
+        assert!(!is_subfolder_allowed("archive", &allow, &deny));
+    }
+
+    #[test]
+    fn test_is_subfolder_allowed_nested_path() {
+        let cfg = make_config(vec!["notes"], vec![], 2);
+        let allow = compile_patterns(&cfg.allow_dirs);
+        let deny = compile_patterns(&cfg.deny_dirs);
+        assert!(is_subfolder_allowed("notes/sub", &allow, &deny));
+        assert!(!is_subfolder_allowed("other/sub", &allow, &deny));
     }
 
     #[test]
@@ -286,5 +323,28 @@ mod tests {
         let ops = plan_renames(&cfg);
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].to.parent().unwrap(), sub.as_path());
+    }
+
+    #[test]
+    fn test_plan_renames_deny_overrides_allow() {
+        let dir = tempfile::tempdir().unwrap();
+        let allowed = dir.path().join("notes");
+        let denied = dir.path().join("archive");
+        std::fs::create_dir(&allowed).unwrap();
+        std::fs::create_dir(&denied).unwrap();
+        std::fs::write(allowed.join("ok.md"), "ok").unwrap();
+        std::fs::write(denied.join("nope.md"), "nope").unwrap();
+
+        let cfg = Config {
+            docs_dir: dir.path().to_path_buf(),
+            format: "%Y-%m-%d-%H-%M-%S".to_string(),
+            extensions: vec!["md".to_string()],
+            allow_dirs: vec!["*".to_string()],
+            deny_dirs: vec!["archive".to_string()],
+            depth: 1,
+        };
+        let ops = plan_renames(&cfg);
+        assert_eq!(ops.len(), 1);
+        assert!(ops[0].from.to_string_lossy().contains("notes"));
     }
 }
