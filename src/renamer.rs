@@ -1,4 +1,5 @@
 use chrono::{DateTime, Local};
+use glob::Pattern;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -150,4 +151,72 @@ fn slugify(name: &str) -> String {
         .replace("--", "-")
         .trim_matches('-')
         .to_string()
+}
+
+fn is_subfolder_allowed(subfolder: &str, config: &Config) -> bool {
+    if config.allow_dirs.is_empty() {
+        return false;
+    }
+    for pat in &config.deny_dirs {
+        if Pattern::new(pat).map_or(false, |p| p.matches(subfolder)) {
+            return false;
+        }
+    }
+    for pat in &config.allow_dirs {
+        if Pattern::new(pat).map_or(false, |p| p.matches(subfolder)) {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn make_config(allow: Vec<&str>, deny: Vec<&str>, depth: usize) -> Config {
+        Config {
+            docs_dir: PathBuf::from("/tmp/test-docs"),
+            format: "%Y-%m-%d-%H-%M-%S".to_string(),
+            extensions: vec!["md".to_string()],
+            allow_dirs: allow.into_iter().map(String::from).collect(),
+            deny_dirs: deny.into_iter().map(String::from).collect(),
+            depth,
+        }
+    }
+
+    #[test]
+    fn test_is_subfolder_allowed_empty_allow() {
+        let cfg = make_config(vec![], vec![], 1);
+        assert!(!is_subfolder_allowed("notes", &cfg));
+    }
+
+    #[test]
+    fn test_is_subfolder_allowed_wildcard() {
+        let cfg = make_config(vec!["*"], vec![], 1);
+        assert!(is_subfolder_allowed("anything", &cfg));
+    }
+
+    #[test]
+    fn test_is_subfolder_allowed_specific() {
+        let cfg = make_config(vec!["running-knowledge"], vec![], 1);
+        assert!(is_subfolder_allowed("running-knowledge", &cfg));
+        assert!(!is_subfolder_allowed("other", &cfg));
+    }
+
+    #[test]
+    fn test_is_subfolder_allowed_glob() {
+        let cfg = make_config(vec!["running-*"], vec![], 1);
+        assert!(is_subfolder_allowed("running-knowledge", &cfg));
+        assert!(is_subfolder_allowed("running-notes", &cfg));
+        assert!(!is_subfolder_allowed("archive", &cfg));
+    }
+
+    #[test]
+    fn test_deny_overrides_allow() {
+        let cfg = make_config(vec!["*"], vec!["archive"], 1);
+        assert!(is_subfolder_allowed("notes", &cfg));
+        assert!(!is_subfolder_allowed("archive", &cfg));
+    }
 }
