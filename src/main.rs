@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use config::Config;
 
 #[derive(Parser)]
-#[command(name = "docs-manager-cli", version, about = "Manage doc files")]
+#[command(name = "docs-manager-cli", version, about = format!("docs-manager-cli v{} — Manage doc files", env!("CARGO_PKG_VERSION")))]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
