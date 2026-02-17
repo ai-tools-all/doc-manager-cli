@@ -14,6 +14,11 @@ docs-manager-cli rename -c cfg.toml  # custom config
 docs_dir = "docs/"
 format = "%Y-%m-%d-%H-%M-%S"
 extensions = ["md"]
+allow_dirs = ["running-knowledge"]   # glob patterns, default: [] (no subfolders)
+deny_dirs = []                        # deny overrides allow
+depth = 1                             # subfolder depth, default: 1
 ```
 
-**Rules:** dry-run by default · uses file creation time · idempotent · CLI > config > defaults
+**Subfolder rules:** denied by default · `allow_dirs = ["*"]` allows all · deny overrides allow · depth=1 means immediate children
+
+**Rules:** dry-run by default · uses file creation time · idempotent · renames in-place · CLI > config > defaults
