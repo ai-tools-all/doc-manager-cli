@@ -15,6 +15,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Create a default .doc-manager-cli/config.toml
+    Init,
+
     /// Rename docs to yyyy-mm-dd-hh-mm-ss-<title>.ext format
     Rename {
         /// Docs directory path
@@ -35,6 +38,26 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Init => {
+            let path = PathBuf::from(".doc-manager-cli/config.toml");
+            if path.exists() {
+                eprintln!("config already exists: {}", path.display());
+                std::process::exit(1);
+            }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("failed to create .doc-manager-cli/");
+            }
+            let template = r#"docs_dir = "docs"
+extensions = ["md"]
+
+# format = "%Y-%m-%d-%H-%M-%S"
+# allow_dirs = []
+# deny_dirs = []
+# depth = 1
+"#;
+            std::fs::write(&path, template).expect("failed to write config");
+            println!("created {}", path.display());
+        }
         Commands::Rename {
             dir,
             execute,
