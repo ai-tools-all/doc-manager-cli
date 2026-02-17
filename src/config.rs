@@ -6,8 +6,10 @@ pub struct FileConfig {
     pub docs_dir: Option<String>,
     pub format: Option<String>,
     pub extensions: Option<Vec<String>>,
-    pub allow_dirs: Option<Vec<String>>,
-    pub deny_dirs: Option<Vec<String>>,
+    #[serde(alias = "allow_dirs")]
+    pub allow: Option<Vec<String>>,
+    #[serde(alias = "deny_dirs")]
+    pub deny: Option<Vec<String>>,
     pub depth: Option<usize>,
 }
 
@@ -16,8 +18,8 @@ pub struct Config {
     pub docs_dir: PathBuf,
     pub format: String,
     pub extensions: Vec<String>,
-    pub allow_dirs: Vec<String>,
-    pub deny_dirs: Vec<String>,
+    pub allow: Vec<String>,
+    pub deny: Vec<String>,
     pub depth: usize,
 }
 
@@ -41,16 +43,16 @@ impl Config {
             .extensions
             .unwrap_or_else(|| vec!["md".to_string()]);
 
-        let allow_dirs = file_cfg.allow_dirs.unwrap_or_default();
-        let deny_dirs = file_cfg.deny_dirs.unwrap_or_default();
+        let allow = file_cfg.allow.unwrap_or_default();
+        let deny = file_cfg.deny.unwrap_or_default();
         let depth = file_cfg.depth.unwrap_or(1);
 
         Config {
             docs_dir,
             format,
             extensions,
-            allow_dirs,
-            deny_dirs,
+            allow,
+            deny,
             depth,
         }
     }
@@ -67,8 +69,8 @@ mod tests {
         let cfg_path = dir.path().join("config.toml");
         std::fs::write(&cfg_path, "").unwrap();
         let cfg = Config::load(&cfg_path, None);
-        assert!(cfg.allow_dirs.is_empty());
-        assert!(cfg.deny_dirs.is_empty());
+        assert!(cfg.allow.is_empty());
+        assert!(cfg.deny.is_empty());
         assert_eq!(cfg.depth, 1);
     }
 
@@ -77,10 +79,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cfg_path = dir.path().join("config.toml");
         let mut f = std::fs::File::create(&cfg_path).unwrap();
-        f.write_all(b"allow_dirs = [\"running-*\", \"notes\"]\ndeny_dirs = [\"archive\"]\ndepth = 2\n").unwrap();
+        f.write_all(b"allow = [\"running-*\", \"notes\"]\ndeny = [\"archive\"]\ndepth = 2\n")
+            .unwrap();
         let cfg = Config::load(&cfg_path, None);
-        assert_eq!(cfg.allow_dirs, vec!["running-*", "notes"]);
-        assert_eq!(cfg.deny_dirs, vec!["archive"]);
+        assert_eq!(cfg.allow, vec!["running-*", "notes"]);
+        assert_eq!(cfg.deny, vec!["archive"]);
         assert_eq!(cfg.depth, 2);
+    }
+
+    #[test]
+    fn test_config_backward_compat_allow_dirs_deny_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg_path = dir.path().join("config.toml");
+        let mut f = std::fs::File::create(&cfg_path).unwrap();
+        f.write_all(b"allow_dirs = [\"notes\"]\ndeny_dirs = [\"archive\"]\n")
+            .unwrap();
+        let cfg = Config::load(&cfg_path, None);
+        assert_eq!(cfg.allow, vec!["notes"]);
+        assert_eq!(cfg.deny, vec!["archive"]);
     }
 }

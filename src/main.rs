@@ -51,8 +51,8 @@ fn main() {
 extensions = ["md"]
 
 # format = "%Y-%m-%d-%H-%M-%S"
-# allow_dirs = []
-# deny_dirs = []
+# allow = []
+# deny = []
 # depth = 1
 "#;
             std::fs::write(&path, template).expect("failed to write config");
