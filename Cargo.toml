@@ -1,6 +1,6 @@
 [package]
 name = "docs-manager-cli"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 
 [dependencies]
@@ -8,6 +8,7 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 chrono = "0.4"
+regex-lite = "0.1"
 
 [profile.release]
 opt-level = 3

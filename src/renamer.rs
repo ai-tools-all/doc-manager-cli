@@ -48,7 +48,8 @@ pub fn plan_renames(config: &Config) -> Vec<RenameOp> {
 
         let timestamp = get_file_time(&path);
         let date_str = timestamp.format(&config.format).to_string();
-        let title = slugify(stem);
+        let stripped = strip_date_prefix(stem);
+        let title = slugify(stripped);
         let new_name = format!("{date_str}-{title}.{ext}");
         let new_path = dir.join(&new_name);
 
@@ -121,6 +122,24 @@ fn get_file_time(path: &Path) -> DateTime<Local> {
         .and_then(|m| m.created().ok().or_else(|| m.modified().ok()))
         .map(DateTime::<Local>::from)
         .unwrap_or_else(Local::now)
+}
+
+fn strip_date_prefix(name: &str) -> &str {
+    use regex_lite::Regex;
+    static PATTERNS: &[&str] = &[
+        r"^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}[-_]?",
+        r"^\d{4}-\d{2}-\d{2}[-_]?",
+    ];
+    for pat in PATTERNS {
+        let re = Regex::new(pat).unwrap();
+        if let Some(m) = re.find(name) {
+            let rest = &name[m.end()..];
+            if !rest.is_empty() {
+                return rest;
+            }
+        }
+    }
+    name
 }
 
 fn slugify(name: &str) -> String {
