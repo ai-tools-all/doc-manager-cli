@@ -66,7 +66,11 @@ pub fn plan_renames(config: &Config) -> Vec<RenameOp> {
             None => continue,
         };
 
-        if is_file_denied(filename, &deny_pats) {
+        let rel_path = path
+            .strip_prefix(dir)
+            .map(|r| r.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if is_file_denied(&rel_path, filename, &deny_pats) {
             continue;
         }
 
@@ -117,8 +121,8 @@ pub fn execute_renames(ops: &[RenameOp]) -> usize {
     count
 }
 
-fn is_file_denied(filename: &str, deny: &[Pattern]) -> bool {
-    deny.iter().any(|pat| pat.matches(filename))
+fn is_file_denied(rel_path: &str, filename: &str, deny: &[Pattern]) -> bool {
+    deny.iter().any(|pat| pat.matches(filename) || pat.matches(rel_path))
 }
 
 fn already_formatted(stem: &str, format: &str) -> bool {
@@ -280,23 +284,31 @@ mod tests {
     #[test]
     fn test_is_file_denied_exact() {
         let deny = vec![Pattern::new("CLAUDE.md").unwrap(), Pattern::new("AGENTS.md").unwrap()];
-        assert!(is_file_denied("CLAUDE.md", &deny));
-        assert!(is_file_denied("AGENTS.md", &deny));
-        assert!(!is_file_denied("notes.md", &deny));
+        assert!(is_file_denied("CLAUDE.md", "CLAUDE.md", &deny));
+        assert!(is_file_denied("AGENTS.md", "AGENTS.md", &deny));
+        assert!(!is_file_denied("notes.md", "notes.md", &deny));
     }
 
     #[test]
     fn test_is_file_denied_glob() {
         let deny = vec![Pattern::new("README*").unwrap()];
-        assert!(is_file_denied("README.md", &deny));
-        assert!(is_file_denied("README-old.md", &deny));
-        assert!(!is_file_denied("notes.md", &deny));
+        assert!(is_file_denied("README.md", "README.md", &deny));
+        assert!(is_file_denied("README-old.md", "README-old.md", &deny));
+        assert!(!is_file_denied("notes.md", "notes.md", &deny));
     }
 
     #[test]
     fn test_is_file_denied_empty() {
         let deny: Vec<Pattern> = vec![];
-        assert!(!is_file_denied("anything.md", &deny));
+        assert!(!is_file_denied("anything.md", "anything.md", &deny));
+    }
+
+    #[test]
+    fn test_is_file_denied_path_based() {
+        let deny = vec![Pattern::new("running-knowledge/AGENTS.md").unwrap()];
+        assert!(is_file_denied("running-knowledge/AGENTS.md", "AGENTS.md", &deny));
+        assert!(!is_file_denied("notes/AGENTS.md", "AGENTS.md", &deny));
+        assert!(!is_file_denied("running-knowledge/other.md", "other.md", &deny));
     }
 
     #[test]
